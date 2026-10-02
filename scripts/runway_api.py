@@ -48,6 +48,12 @@ class RunwayAPIClient:
     ) -> Dict[str, Any]:
         url = f"{self.base_url.rstrip('/')}/v1{path}"
         
+        print(f"\n[DEBUG] Request:")
+        print(f"  URL: {url}")
+        print(f"  Method: {method}")
+        if json_body:
+            print(f"  Body: {json.dumps(json_body, indent=2)}")
+        
         try:
             response = self.session.request(
                 method=method,
@@ -59,14 +65,19 @@ class RunwayAPIClient:
         except requests.RequestException as exc:
             raise RunwayAPIError(f"Request failed: {exc}")
 
+        print(f"\n[DEBUG] Response:")
+        print(f"  Status: {response.status_code}")
+        
         try:
             payload = response.json()
         except ValueError:
             payload = {"raw": response.text}
 
         if response.status_code < 400:
+            print(f"  Body: {json.dumps(payload, indent=2)}")
             return payload
 
+        print(f"  Error: {json.dumps(payload, indent=2, ensure_ascii=False)}")
         message = payload.get("error") or payload.get("message") or response.text
         raise RunwayAPIError(f"Runway API error {response.status_code}: {message}")
 
@@ -114,13 +125,12 @@ if __name__ == "__main__":
 
     client = RunwayAPIClient()
     
-    # Example prompt for nervis-cartoon
     prompt = "cartoon bear character, sitting in forest, bright colors, cinematic lighting, cartoon style"
     
     try:
         print(f"\nGenerating image with prompt:\n  {prompt}\n")
         result = client.text_to_image(prompt=prompt)
-        print("Generation task created:")
+        print("\nGeneration task created:")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         
         task_id = result.get("id")
@@ -130,12 +140,11 @@ if __name__ == "__main__":
             print("\nTask completed:")
             print(json.dumps(final_result, ensure_ascii=False, indent=2))
             
-            # Get output URL if available
             outputs = final_result.get("output", [])
             if outputs:
                 print(f"\nGenerated image URL: {outputs[0]}")
         
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"\nERROR: {e}")
         import traceback
         traceback.print_exc()
