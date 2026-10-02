@@ -81,10 +81,16 @@ class RunwayAPIClient:
         message = payload.get("error") or payload.get("message") or response.text
         raise RunwayAPIError(f"Runway API error {response.status_code}: {message}")
 
-    def text_to_image(self, prompt: str, model: Optional[str] = None, **extra_fields) -> Dict[str, Any]:
-        """Generate an image from text prompt."""
+    def text_to_image(self, prompt_text: str, model: Optional[str] = None, **extra_fields) -> Dict[str, Any]:
+        """Generate an image from text prompt.
+        
+        Args:
+            prompt_text: Text description for the image (1-1000 characters)
+            model: Model name (default: gen3)
+            **extra_fields: Additional parameters (width, height, seed, etc.)
+        """
         model = model or GENERATION_MODEL
-        body = {"model": model, "prompt": prompt, **extra_fields}
+        body = {"model": model, "promptText": prompt_text, **extra_fields}
         return self._request("POST", "/text_to_image", json_body=body)
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
@@ -125,11 +131,11 @@ if __name__ == "__main__":
 
     client = RunwayAPIClient()
     
-    prompt = "cartoon bear character, sitting in forest, bright colors, cinematic lighting, cartoon style"
+    prompt_text = "cartoon bear character, sitting in forest, bright colors, cinematic lighting, cartoon style"
     
     try:
-        print(f"\nGenerating image with prompt:\n  {prompt}\n")
-        result = client.text_to_image(prompt=prompt)
+        print(f"\nGenerating image with prompt:\n  {prompt_text}\n")
+        result = client.text_to_image(prompt_text=prompt_text)
         print("\nGeneration task created:")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         
