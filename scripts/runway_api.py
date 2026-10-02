@@ -13,7 +13,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 RUNWAY_API_KEY = os.getenv("RUNWAY_API_KEY")
 RUNWAY_API_BASE_URL = os.getenv("RUNWAY_API_BASE_URL", "https://api.dev.runwayml.com")
-GENERATION_MODEL = os.getenv("GENERATION_MODEL", "gen3")
+GENERATION_MODEL = os.getenv("GENERATION_MODEL", "gpt_image_2")
 
 
 class RunwayAPIError(RuntimeError):
@@ -65,8 +65,7 @@ class RunwayAPIClient:
         except requests.RequestException as exc:
             raise RunwayAPIError(f"Request failed: {exc}")
 
-        print(f"\n[DEBUG] Response:")
-        print(f"  Status: {response.status_code}")
+        print(f"\n[DEBUG] Response Status: {response.status_code}")
         
         try:
             payload = response.json()
@@ -74,23 +73,28 @@ class RunwayAPIClient:
             payload = {"raw": response.text}
 
         if response.status_code < 400:
-            print(f"  Body: {json.dumps(payload, indent=2)}")
             return payload
 
-        print(f"  Error: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+        print(f"[DEBUG] Error Details: {json.dumps(payload, indent=2, ensure_ascii=False)}")
         message = payload.get("error") or payload.get("message") or response.text
         raise RunwayAPIError(f"Runway API error {response.status_code}: {message}")
 
-    def text_to_image(self, prompt_text: str, model: Optional[str] = None, **extra_fields) -> Dict[str, Any]:
-        """Generate an image from text prompt.
+    def text_to_image(self, prompt_text: str, model: Optional[str] = None, ratio: str = "1920:1088", **extra_fields) -> Dict[str, Any]:
+        """
+        Generate an image from text prompt using gpt_image_2.
         
-        Args:
-            prompt_text: Text description for the image (1-1000 characters)
-            model: Model name (default: gen3)
-            **extra_fields: Additional parameters (width, height, seed, etc.)
+        Valid ratios for gpt_image_2:
+        1920:1088, 1920:1280, 1920:1440, 1920:1536, 1920:1920,
+        1536:1920, 1440:1920, 1280:1920, 1088:1920, etc.
+        or "auto"
         """
         model = model or GENERATION_MODEL
-        body = {"model": model, "promptText": prompt_text, **extra_fields}
+        body = {
+            "model": model,
+            "promptText": prompt_text,
+            "ratio": ratio,
+            **extra_fields
+        }
         return self._request("POST", "/text_to_image", json_body=body)
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
@@ -102,14 +106,14 @@ class RunwayAPIClient:
         task_id: str,
         *,
         poll_interval: int = 5,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = 600,
     ) -> Dict[str, Any]:
         """Poll task until completion."""
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             task = self.get_task(task_id)
             status = str(task.get("status", "")).lower()
-            print(f"Task {task_id}: {status}")
+            print(f"[POLL] Task {task_id}: {status}")
             if status in {"succeeded", "completed"}:
                 return task
             if status in {"failed", "cancelled", "canceled"}:
@@ -117,17 +121,39 @@ class RunwayAPIClient:
             time.sleep(poll_interval)
         raise TimeoutError(f"Task {task_id} did not finish within {timeout_seconds} seconds")
 
+    @staticmethod
+    def download_image(url: str, filename: str) -> str:
+        """Download image from URL and save locally."""
+        try:
+            print(f"\n[DOWNLOAD] Downloading image from URL...")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            # Create output directory if it doesn't exist
+            output_dir = PROJECT_ROOT / "generated_images"
+            output_dir.mkdir(exist_ok=True)
+            
+            filepath = output_dir / filename
+            with open(filepath, "wb") as f:
+                f.write(response.content)
+            
+            print(f"✓ Image saved to: {filepath}")
+            return str(filepath)
+        except Exception as e:
+            print(f"✗ Failed to download image: {e}")
+            raise
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    print("=" * 60)
+    print("=" * 70)
     print("Runway API Client - Text to Image")
-    print("=" * 60)
+    print("=" * 70)
     print(f"Base URL: {RUNWAY_API_BASE_URL}")
     print(f"Model: {GENERATION_MODEL}")
     print(f"API Key: {RUNWAY_API_KEY[:20]}...")
-    print("=" * 60)
+    print("=" * 70)
 
     client = RunwayAPIClient()
     
@@ -135,22 +161,30 @@ if __name__ == "__main__":
     
     try:
         print(f"\nGenerating image with prompt:\n  {prompt_text}\n")
-        result = client.text_to_image(prompt_text=prompt_text)
-        print("\nGeneration task created:")
+        result = client.text_to_image(prompt_text=prompt_text, ratio="1920:1088")
+        print("\n✓ Generation task created successfully!")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         
         task_id = result.get("id")
         if task_id:
-            print(f"\nWaiting for task {task_id}...")
+            print(f"\n→ Waiting for task {task_id} to complete...")
+            print("  (This may take a few minutes)")
             final_result = client.wait_for_task(task_id, timeout_seconds=600)
-            print("\nTask completed:")
+            print("\n✓ Task completed!")
             print(json.dumps(final_result, ensure_ascii=False, indent=2))
             
             outputs = final_result.get("output", [])
             if outputs:
-                print(f"\nGenerated image URL: {outputs[0]}")
+                url = outputs[0]
+                print(f"\n✓ Generated image URL:\n  {url}")
+                
+                # Download and save locally
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                filename = f"generated_{timestamp}.png"
+                local_path = client.download_image(url, filename)
+                print(f"✓ Local path: {local_path}")
         
     except Exception as e:
-        print(f"\nERROR: {e}")
+        print(f"\n✗ ERROR: {e}")
         import traceback
         traceback.print_exc()
